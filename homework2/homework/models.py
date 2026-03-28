@@ -1,0 +1,249 @@
+"""
+Implement the following models for classification.
+
+Feel free to modify the arguments for each of model's __init__ function.
+This will be useful for tuning model hyperparameters such as hidden_dim, num_layers, etc,
+but remember that the grader will assume the default constructor!
+"""
+
+from pathlib import Path
+
+import torch
+import torch.nn as nn
+
+
+class ClassificationLoss(nn.Module):
+    def forward(self, logits: torch.Tensor, target: torch.LongTensor) -> torch.Tensor:
+        """
+        Multi-class classification loss
+        Hint: simple one-liner
+
+        Args:
+            logits: tensor (b, c) logits, where c is the number of classes
+            target: tensor (b,) labels
+
+        Returns:
+            tensor, scalar loss
+        """
+        return nn.functional.cross_entropy(logits, target)
+
+
+class LinearClassifier(nn.Module):
+    def __init__(
+        self,
+        h: int = 64,
+        w: int = 64,
+        num_classes: int = 6,
+    ):
+        """
+        Args:
+            h: int, height of the input image
+            w: int, width of the input image
+            num_classes: int, number of classes
+        """
+        super().__init__()
+       
+        self.model = nn.Linear(3 * h * w, num_classes)
+
+
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: tensor (b, 3, H, W) image
+
+        Returns:
+            tensor (b, num_classes) logits
+        """
+        b = x.shape[0]
+        x = x.view(b, -1)
+        return self.model(x)
+
+
+class MLPClassifier(nn.Module):
+    def __init__(
+        self,
+        h: int = 64,
+        w: int = 64,
+        num_classes: int = 6,
+    ):
+        """
+        An MLP with a single hidden layer
+
+        Args:
+            h: int, height of the input image
+            w: int, width of the input image
+            num_classes: int, number of classes
+        """
+        super().__init__()
+
+        self.model = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(3 * h * w, 128),
+            nn.LayerNorm(128),
+            nn.ReLU(),
+            nn.Linear(128, num_classes),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: tensor (b, 3, H, W) image
+
+        Returns:
+            tensor (b, num_classes) logits
+        """
+        return self.model(x)
+
+        
+
+
+class MLPClassifierDeep(nn.Module):
+    def __init__(
+        self,
+        h: int = 64,
+        w: int = 64,
+        num_classes: int = 6,
+        hidden_dim: int = 165,
+        num_layers: int = 8,
+    ):
+        """
+        An MLP with multiple hidden layers
+
+        Args:
+            h: int, height of image
+            w: int, width of image
+            num_classes: int
+            hidden_dim: int, size of hidden layers
+            num_layers: int, number of hidden layers
+        """
+        super().__init__()
+
+        layers = [nn.Flatten()]
+        in_features = 3 * h * w
+        for _ in range(num_layers):
+            layers.append(nn.Linear(in_features, hidden_dim))
+            layers.append(nn.LayerNorm(hidden_dim))
+            layers.append(nn.ReLU())
+            in_features = hidden_dim
+        layers.append(nn.Linear(hidden_dim, num_classes))
+        self.model = nn.Sequential(*layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: tensor (b, 3, H, W) image
+
+        Returns:
+            tensor (b, num_classes) logits
+        """
+        return self.model(x)
+
+
+class MLPClassifierDeepResidual(nn.Module):
+    class Block(nn.Module):
+        def __init__(self, dim):
+            super().__init__()
+            self.model = nn.Sequential(
+                nn.Linear(dim, dim),
+                nn.LayerNorm(dim),
+                nn.ReLU(),
+                nn.Linear(dim, dim),
+                nn.LayerNorm(dim),
+                nn.ReLU(),
+            )
+            self.skip = nn.Identity()
+
+        def forward(self, x):
+            return self.skip(x) + self.model(x)
+
+    def __init__(
+        self,
+        h: int = 64,
+        w: int = 64,
+        num_classes: int = 6,
+        hidden_dim: int = 160,
+        num_layers: int = 5,
+    ):
+        """
+        Deep MLP with residual blocks built like lecture examples.
+
+        Args:
+            h: image height
+            w: image width
+            num_classes: number of output classes
+            hidden_dim: width of each hidden layer
+            num_layers: number of residual blocks
+        """
+        super().__init__()
+
+        # first flatten and project
+        self.flatten = nn.Flatten()
+        self.input_linear = nn.Linear(3 * h * w, hidden_dim)
+        self.relu = nn.ReLU()
+
+        # stack residual blocks
+        self.blocks = nn.ModuleList([MLPClassifierDeepResidual.Block(hidden_dim) for _ in range(num_layers)])
+
+        # classifier head
+        self.output_linear = nn.Linear(hidden_dim, num_classes)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.flatten(x)
+        x = self.relu(self.input_linear(x))
+        for blk in self.blocks:
+            x = blk(x)
+        return self.output_linear(x)
+
+
+model_factory = {
+    "linear": LinearClassifier,
+    "mlp": MLPClassifier,
+    "mlp_deep": MLPClassifierDeep,
+    "mlp_deep_residual": MLPClassifierDeepResidual,
+}
+
+
+def calculate_model_size_mb(model: torch.nn.Module) -> float:
+    """
+    Args:
+        model: torch.nn.Module
+
+    Returns:
+        float, size in megabytes
+    """
+    return sum(p.numel() for p in model.parameters()) * 4 / 1024 / 1024
+
+
+def save_model(model):
+    """
+    Use this function to save your model in train.py
+    """
+    for n, m in model_factory.items():
+        if isinstance(model, m):
+            return torch.save(model.state_dict(), Path(__file__).resolve().parent / f"{n}.th")
+    raise ValueError(f"Model type '{str(type(model))}' not supported")
+
+
+def load_model(model_name: str, with_weights: bool = False, **model_kwargs):
+    """
+    Called by the grader to load a pre-trained model by name
+    """
+    r = model_factory[model_name](**model_kwargs)
+    if with_weights:
+        model_path = Path(__file__).resolve().parent / f"{model_name}.th"
+        assert model_path.exists(), f"{model_path.name} not found"
+        try:
+            r.load_state_dict(torch.load(model_path, map_location="cpu"))
+        except RuntimeError as e:
+            raise AssertionError(
+                f"Failed to load {model_path.name}, make sure the default model arguments are set correctly"
+            ) from e
+
+    # Limit model sizes since they will be zipped and submitted
+    model_size_mb = calculate_model_size_mb(r)
+    if model_size_mb > 10:
+        raise AssertionError(f"{model_name} is too large: {model_size_mb:.2f} MB")
+    print(f"Model size: {model_size_mb:.2f} MB")
+
+    return r
