@@ -1,3 +1,5 @@
 **/classification_data/
 **/drive_data/
 **/__pycache__/
+*.th
+logs/
