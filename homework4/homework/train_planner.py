@@ -52,7 +52,14 @@ def train(
 
     # create loss function and optimizer
     loss_func = nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    optimizer_name = kwargs.get("optimizer", "adam").lower()
+    if optimizer_name == "sgd":
+        optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
+    elif optimizer_name == "adamw":
+        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
+    else:
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    print(f"Using optimizer: {optimizer.__class__.__name__}")
     
     # create metrics
     train_metric = PlannerMetric()
@@ -142,6 +149,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_name", type=str, default="mlp_planner")
     parser.add_argument("--num_epoch", type=int, default=50)
     parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--optimizer", type=str, default="adam", choices=["adam", "adamw", "sgd"], help="Optimizer to use")
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--seed", type=int, default=2024)
 
