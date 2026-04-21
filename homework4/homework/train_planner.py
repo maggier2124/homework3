@@ -38,6 +38,9 @@ def train(
     torch.manual_seed(seed)
     np.random.seed(seed)
 
+    # extract training-only kwargs so they are not forwarded to load_model
+    optimizer_name = kwargs.pop("optimizer", "adam").lower()
+
     # directory with timestamp to save tensorboard logs and model checkpoints
     log_dir = Path(exp_dir) / f"{model_name}_{datetime.now().strftime('%m%d_%H%M%S')}"
     logger = tb.SummaryWriter(log_dir)
@@ -52,7 +55,6 @@ def train(
 
     # create loss function and optimizer
     loss_func = nn.MSELoss()
-    optimizer_name = kwargs.get("optimizer", "adam").lower()
     if optimizer_name == "sgd":
         optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
     elif optimizer_name == "adamw":
