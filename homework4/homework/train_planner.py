@@ -79,11 +79,20 @@ def train(
         model.train()
 
         for batch in train_data:
-            track_left, track_right, waypoints, waypoints_mask = batch["track_left"], batch["track_right"], batch["waypoints"], batch["waypoints_mask"]
-            track_left, track_right, waypoints, waypoints_mask = track_left.to(device), track_right.to(device), waypoints.to(device), waypoints_mask.to(device)
+            # collect tensors from batch and move to device
+            waypoints = batch["waypoints"].to(device)
+            waypoints_mask = batch["waypoints_mask"].to(device)
 
-            # forward pass
-            pred = model(track_left, track_right)
+            # prepare model inputs depending on available data
+            model_inputs = {}
+            if "image" in batch:
+                model_inputs["image"] = batch["image"].to(device)
+            else:
+                model_inputs["track_left"] = batch["track_left"].to(device)
+                model_inputs["track_right"] = batch["track_right"].to(device)
+
+            # forward pass (model accepts kwargs like image=... or track_left=...)
+            pred = model(**model_inputs)
 
             # weighted SmoothL1 (Huber-like) loss: weight lateral error higher
             weights = torch.tensor([1.0, 3.0], device=device)  # [longitudinal, lateral]
@@ -109,12 +118,19 @@ def train(
             model.eval()
 
             for batch in val_data:
-                track_left, track_right, waypoints, waypoints_mask = batch["track_left"], batch["track_right"], batch["waypoints"], batch["waypoints_mask"]
-                track_left, track_right, waypoints, waypoints_mask = track_left.to(device), track_right.to(device), waypoints.to(device), waypoints_mask.to(device)
+                waypoints = batch["waypoints"].to(device)
+                waypoints_mask = batch["waypoints_mask"].to(device)
+
+                model_inputs = {}
+                if "image" in batch:
+                    model_inputs["image"] = batch["image"].to(device)
+                else:
+                    model_inputs["track_left"] = batch["track_left"].to(device)
+                    model_inputs["track_right"] = batch["track_right"].to(device)
 
                 # forward pass
-                pred = model(track_left, track_right)
-                
+                pred = model(**model_inputs)
+
                 # update metrics
                 val_metric.add(pred, waypoints, waypoints_mask)
 
