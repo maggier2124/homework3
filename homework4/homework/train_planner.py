@@ -40,6 +40,7 @@ def train(
 
     # extract training-only kwargs so they are not forwarded to load_model
     optimizer_name = kwargs.pop("optimizer", "adam").lower()
+    transform_pipeline = kwargs.pop("transform_pipeline", "state_only")
 
     # directory with timestamp to save tensorboard logs and model checkpoints
     log_dir = Path(exp_dir) / f"{model_name}_{datetime.now().strftime('%m%d_%H%M%S')}"
@@ -50,8 +51,8 @@ def train(
     model = model.to(device)
     model.train()
 
-    train_data = load_data("drive_data/train", transform_pipeline="state_only", shuffle=True, batch_size=batch_size, num_workers=2)
-    val_data = load_data("drive_data/val", transform_pipeline="state_only", shuffle=False)
+    train_data = load_data("drive_data/train", transform_pipeline=transform_pipeline, shuffle=True, batch_size=batch_size, num_workers=2)
+    val_data = load_data("drive_data/val", transform_pipeline=transform_pipeline, shuffle=False)
 
     # create loss function and optimizer
     loss_func = nn.MSELoss()
@@ -162,6 +163,7 @@ if __name__ == "__main__":
     parser.add_argument("--optimizer", type=str, default="adam", choices=["adam", "adamw", "sgd"], help="Optimizer to use")
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--seed", type=int, default=2024)
+    parser.add_argument("--transform_pipeline", type=str, default="state_only", choices=["default", "state_only", "aug"], help="Data transform pipeline")
 
     # optional: additional model hyperparamters
     # parser.add_argument("--num_layers", type=int, default=3)

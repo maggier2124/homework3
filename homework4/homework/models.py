@@ -71,7 +71,23 @@ class TransformerPlanner(nn.Module):
         self.n_track = n_track
         self.n_waypoints = n_waypoints
 
+        # small Transformer: encode track points and decode queries for waypoints
+        self.d_model = d_model
+        self.input_proj = nn.Linear(4, d_model)
+        self.pos_embed = nn.Parameter(torch.zeros(n_track, d_model))
+
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=4, dim_feedforward=256, batch_first=True)
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=2)
+
+        decoder_layer = nn.TransformerDecoderLayer(d_model=d_model, nhead=4, dim_feedforward=256, batch_first=True)
+        self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=2)
+
         self.query_embed = nn.Embedding(n_waypoints, d_model)
+        self.output_proj = nn.Linear(d_model, 2)
+
+        # initialize positional embedding
+        nn.init.normal_(self.pos_embed, mean=0.0, std=0.02)
+        nn.init.normal_(self.query_embed.weight, mean=0.0, std=0.02)
 
     def forward(
         self,
@@ -92,7 +108,27 @@ class TransformerPlanner(nn.Module):
         Returns:
             torch.Tensor: future waypoints with shape (b, n_waypoints, 2)
         """
-        raise NotImplementedError
+        # concatenate left and right track points -> (B, n_track, 4)
+        x = torch.cat([track_left, track_right], dim=-1)
+
+        # project to model dim and add positional embedding
+        x = self.input_proj(x)  # (B, n_track, d_model)
+        x = x + self.pos_embed[None, :, :]
+
+        # encode
+        memory = self.encoder(x)  # (B, n_track, d_model)
+
+        # prepare queries
+        bsize = memory.shape[0]
+        queries = self.query_embed.weight.unsqueeze(0).expand(bsize, -1, -1)  # (B, n_waypoints, d_model)
+
+        # decode with cross-attention to memory
+        tgt = self.decoder(tgt=queries, memory=memory)
+
+        # project to 2D waypoints
+        out = self.output_proj(tgt)  # (B, n_waypoints, 2)
+
+        return out
 
 
 class CNNPlanner(torch.nn.Module):
@@ -106,6 +142,40 @@ class CNNPlanner(torch.nn.Module):
 
         self.register_buffer("input_mean", torch.as_tensor(INPUT_MEAN), persistent=False)
         self.register_buffer("input_std", torch.as_tensor(INPUT_STD), persistent=False)
+    def forward(self, image: torch.Tensor, **kwargs) -> torch.Tensor:
+        # simple encoder similar to HW3 Detector encoder but smaller
+        # Input expected shape (b, 3, 96, 128)
+        self.encoder = nn.Sequential(
+            nn.Conv2d(3, 32, kernel_size=3, padding=1, stride=2),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(32, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+
+            nn.Conv2d(32, 64, kernel_size=3, padding=1, stride=2),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+
+            nn.Conv2d(64, 128, kernel_size=3, padding=1, stride=2),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(128, 128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+        )
+
+        # final projection will map pooled features to waypoints
+        self.head = nn.Sequential(
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten(),
+            nn.Linear(128, 128),
+            nn.ReLU(inplace=True),
+            nn.Linear(128, n_waypoints * 2),
+        )
 
     def forward(self, image: torch.Tensor, **kwargs) -> torch.Tensor:
         """
@@ -118,7 +188,10 @@ class CNNPlanner(torch.nn.Module):
         x = image
         x = (x - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
 
-        raise NotImplementedError
+        features = self.encoder(x)
+        out = self.head(features)
+
+        return out.view(-1, self.n_waypoints, 2)
 
 
 MODEL_FACTORY = {
