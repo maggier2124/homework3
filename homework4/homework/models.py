@@ -142,7 +142,7 @@ class CNNPlanner(torch.nn.Module):
 
         self.register_buffer("input_mean", torch.as_tensor(INPUT_MEAN), persistent=False)
         self.register_buffer("input_std", torch.as_tensor(INPUT_STD), persistent=False)
-    def forward(self, image: torch.Tensor, **kwargs) -> torch.Tensor:
+        # encoder and head must be created in __init__ so parameters register
         # simple encoder similar to HW3 Detector encoder but smaller
         # Input expected shape (b, 3, 96, 128)
         self.encoder = nn.Sequential(
